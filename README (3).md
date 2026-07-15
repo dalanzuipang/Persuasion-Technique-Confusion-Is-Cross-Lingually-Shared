@@ -1,0 +1,183 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 04 -- Coupling support: Table III and Figure 2 (RQ1)\n",
+    "\n",
+    "Equation (2) is rank-one: a unit's off-diagonal mass carries no information\n",
+    "beyond its two residual marginals. The number of cells it touches is\n",
+    "therefore `||d||_0 x ||e||_0`, and that is what the choice of unit controls.\n",
+    "\n",
+    "Expected (paper §IV-A):\n",
+    "- cells: article 21.7-72.2, paragraph 3.1-16.6, **disjoint**, ratio 2.7-13.2x, 9/9\n",
+    "- mean 46 of 506 (article) against 10 (paragraph)\n",
+    "- `||d||_0` separates by unit (4.85-7.44 vs 1.24-1.99), `||e||_0` does not\n",
+    "- `||d||_0 / ||y||_1` tracks over-prediction: rho=+0.93 (article), +0.88 (paragraph)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import sys; sys.path.insert(0, 'src')\n",
+    "from common import *\n",
+    "from scipy.stats import spearmanr\n",
+    "\n",
+    "PARA_IDX = {l: build_para_index(l) for l in LANGS}\n",
+    "ARTICLE_IDS = {l: set(PARA_IDX[l].keys()) for l in LANGS}\n",
+    "GOLD_PS, PRED_PS, KEYS = {}, {}, {}\n",
+    "for l in LANGS:\n",
+    "    GOLD_PS[l], _ = spans_to_paragraphs(load_gold(l), PARA_IDX[l])\n",
+    "    KEYS[l] = paragraph_keys(PARA_IDX[l])\n",
+    "    for m in METHODS:\n",
+    "        PRED_PS[(l, m)], _ = spans_to_paragraphs(load_pred(l, m), PARA_IDX[l])\n",
+    "print('ready')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# --- Table III ---\n",
+    "rows = []\n",
+    "for l, m in CONFIGS:\n",
+    "    g, p = load_gold(l), load_pred(l, m)\n",
+    "    Yg_a, Yp_a, _ = article_multihot(g, p, ARTICLE_IDS[l])\n",
+    "    Yg_p, Yp_p = paragraph_multihot(GOLD_PS[l], PRED_PS[(l, m)], KEYS[l])\n",
+    "    for unit, (Yg, Yp) in [('article', (Yg_a, Yp_a)), ('paragraph', (Yg_p, Yp_p))]:\n",
+    "        rows.append({'lang': l, 'method': m, 'unit': unit, **residual_support(Yg, Yp)})\n",
+    "\n",
+    "sup = pd.DataFrame(rows)\n",
+    "sup['ratio_d'] = sup['d0'] / sup['gold']\n",
+    "sup.to_csv(RESULTS / 'table3_coupling_support.csv', index=False)\n",
+    "\n",
+    "print(f\"{'config':<18} {'unit':<10} {'|y|':>5} {'|yh|':>6} {'ovr':>5} \"\n",
+    "      f\"{'||d||0':>7} {'||e||0':>7} {'cells':>7}\")\n",
+    "print('-' * 70)\n",
+    "for l, m in CONFIGS:\n",
+    "    for u in ['article', 'paragraph']:\n",
+    "        r = sup[(sup.lang == l) & (sup.method == m) & (sup.unit == u)].iloc[0]\n",
+    "        print(f'{LANG_LABEL[l]} {METHOD_LABEL[m]:<12} {u:<10} {r.gold:>5.2f} '\n",
+    "              f'{r.pred:>6.2f} {r.over_pred:>5.2f} {r.d0:>7.2f} {r.e0:>7.2f} {r.cells:>7.1f}')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# --- the headline contrast ---\n",
+    "a, p = sup[sup.unit == 'article'], sup[sup.unit == 'paragraph']\n",
+    "print(f'cells   article {a.cells.min():.1f}-{a.cells.max():.1f}  |  '\n",
+    "      f'paragraph {p.cells.min():.1f}-{p.cells.max():.1f}')\n",
+    "print(f'        disjoint: {p.cells.max() < a.cells.min()}     (paper: yes)')\n",
+    "print(f'        mean {a.cells.mean():.0f} vs {p.cells.mean():.0f} of 506'\n",
+    "      f'   (paper: 46 vs 10)')\n",
+    "\n",
+    "piv = sup.pivot_table(index=['lang', 'method'], columns='unit', values='cells')\n",
+    "piv['ratio'] = piv['article'] / piv['paragraph']\n",
+    "print(f'\\nratio   {piv.ratio.min():.1f}-{piv.ratio.max():.1f}x, '\n",
+    "      f'article > paragraph in {(piv.ratio > 1).sum()}/9   (paper: 2.7-13.2x, 9/9)')\n",
+    "\n",
+    "print(f'\\n||d||0  article {a.d0.min():.2f}-{a.d0.max():.2f}  |  '\n",
+    "      f'paragraph {p.d0.min():.2f}-{p.d0.max():.2f}   disjoint: {p.d0.max() < a.d0.min()}')\n",
+    "print(f'||e||0  article {a.e0.min():.2f}-{a.e0.max():.2f}  |  '\n",
+    "      f'paragraph {p.e0.min():.2f}-{p.e0.max():.2f}   disjoint: {p.e0.max() < a.e0.min()}')\n",
+    "print('\\nThe granularity effect is carried by the gold side alone (paper §IV-A).')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# --- the L1-normalisation mechanism (paper §III-A) ---\n",
+    "for u in ['article', 'paragraph']:\n",
+    "    d = sup[sup.unit == u]\n",
+    "    r, pv = spearmanr(d.over_pred, d.ratio_d)\n",
+    "    print(f'{u:<10} rho(over-pred, ||d||0/|y|) = {r:+.3f}, p = {pv:.4f}   (n=9)')\n",
+    "r, pv = spearmanr(sup.over_pred, sup.ratio_d)\n",
+    "print(f'{\"pooled\":<10} rho = {r:+.3f}, p = {pv:.4f}   (n=18)')\n",
+    "print('\\npaper §IV-A: +0.93 (article), +0.88 (paragraph), +0.49 pooled.')\n",
+    "print('The relation does not pool because a paragraph carries too few gold')\n",
+    "print('techniques for the ratio to be finely graded.')\n",
+    "\n",
+    "hi = sup[(sup.unit == 'article') & (sup.over_pred >= 1.8)]\n",
+    "print(f'\\narticle configs over-predicting >= 1.8x: {len(hi)}, '\n",
+    "      f'ratio_d in {hi.ratio_d.min():.2f}-{hi.ratio_d.max():.2f}   (paper: 7, 0.93-1.00)')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# --- Figure 2 ---\n",
+    "import matplotlib as mpl, matplotlib.pyplot as plt\n",
+    "\n",
+    "x, w = np.arange(9), 0.38\n",
+    "get = lambda u, col: [sup[(sup.lang == l) & (sup.method == m) & (sup.unit == u)][col].values[0]\n",
+    "                      for l, m in CONFIGS]\n",
+    "\n",
+    "with mpl.rc_context(PLOT_RC):\n",
+    "    fig, axes = plt.subplots(1, 2, figsize=(COL2, 2.7))\n",
+    "    panels = [('d0', r'$\\Vert d\\Vert_0$', '(a) Gold-side deficit', False),\n",
+    "              ('cells', r'$\\Vert d\\Vert_0 \\times \\Vert e\\Vert_0$',\n",
+    "               '(b) Cells spanned (of 506)', True)]\n",
+    "    for ax, (col, ylab, title, annot) in zip(axes, panels):\n",
+    "        va, vp = get('article', col), get('paragraph', col)\n",
+    "        b1 = ax.bar(x - w/2, va, w, label='Article', color=BLUE_D, edgecolor='none')\n",
+    "        b2 = ax.bar(x + w/2, vp, w, label='Paragraph', color=BLUE_L, edgecolor='none')\n",
+    "        if annot:\n",
+    "            for b in list(b1) + list(b2):\n",
+    "                ax.annotate(f'{b.get_height():.0f}',\n",
+    "                            (b.get_x() + b.get_width()/2, b.get_height()),\n",
+    "                            ha='center', va='bottom', fontsize=5.0,\n",
+    "                            xytext=(0, 0.8), textcoords='offset points')\n",
+    "            ax.set_ylim(0, max(va) * 1.18)\n",
+    "        ax.set_ylabel(ylab); ax.set_title(title, fontweight='bold', pad=3)\n",
+    "        ax.legend(frameon=False, loc='upper right', handlelength=1.0,\n",
+    "                  borderpad=0.1, labelspacing=0.2, handletextpad=0.4)\n",
+    "        ax.set_xticks(x)\n",
+    "        ax.set_xticklabels([METHOD_LABEL[m] for _, m in CONFIGS],\n",
+    "                           rotation=42, ha='right', rotation_mode='anchor', fontsize=6.5)\n",
+    "        ax.tick_params(axis='x', pad=1)\n",
+    "        for s in (2.5, 5.5):\n",
+    "            ax.axvline(s, color='0.82', lw=0.6, zorder=0)\n",
+    "        for i, l in enumerate(LANGS):\n",
+    "            ax.text(1 + 3*i, -0.28, LANG_LABEL[l], transform=ax.get_xaxis_transform(),\n",
+    "                    ha='center', va='top', fontsize=7.5, fontweight='bold')\n",
+    "        ax.set_xlim(-0.7, 8.7)\n",
+    "        ax.grid(axis='y', alpha=0.25, lw=0.5); ax.set_axisbelow(True)\n",
+    "    plt.tight_layout(pad=0.4, w_pad=1.1)\n",
+    "    plt.subplots_adjust(bottom=0.24)\n",
+    "    for ext in ['pdf', 'png']:\n",
+    "        fig.savefig(FIGURES / f'fig_support.{ext}')\n",
+    "    plt.show()\n",
+    "print('saved results/figures/fig_support.{pdf,png}')"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "name": "python",
+   "version": "3.10"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
